@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import math
@@ -322,26 +321,21 @@ class TransformerLM(nn.Module):
 
 
 
-def init_model_from_config(config, checkpoint_dir):
+def init_model_from_config(config):
     model_cfg = config['model']
     data_cfg = config['data']
     device = config['training']['device']
 
     model = TransformerLM(
-        vocab_size=model_cfg['vocab_size'],
-        context_length=data_cfg['context_length'],
-        d_model=model_cfg['d_model'],
-        num_layers=model_cfg['num_layers'],
-        num_heads=model_cfg['num_heads'],
-        d_ff=model_cfg['d_ff'],
-        rope_theta=model_cfg.get('rope_theta', 10000.0),
-        device=device,
+        vocab_size=int(model_cfg['vocab_size']),
+        context_length=int(data_cfg['context_length']),
+        d_model=int(model_cfg['d_model']),
+        num_layers=int(model_cfg['num_layers']),
+        num_heads=int(model_cfg['num_heads']),
+        d_ff=int(model_cfg['d_ff']),
+        rope_theta=float(model_cfg.get('rope_theta', 10000.0)),
+        device=str(device),
     )
-
-    if checkpoint_dir is not None:
-        checkpoint_path = os.path.join(checkpoint_dir, 'checkpoint.pt')
-        state = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(state['model'])
 
     return model
 

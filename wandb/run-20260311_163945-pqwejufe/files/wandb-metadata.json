@@ -1,0 +1,17 @@
+{
+  "os":  "macOS-15.7.3-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.13.11",
+  "startedAt":  "2026-03-11T23:39:45.383904Z",
+  "program":  "/Users/krangana/assignment1-basics/cs336_basics/train.py",
+  "codePath":  "cs336_basics/train.py",
+  "codePathLocal":  "cs336_basics/train.py",
+  "git":  {
+    "remote":  "https://github.com/Hoponga/assignment1-basics.git",
+    "commit":  "8fa5d1d0e603b6a08c04b9c1a7de63eb47caf115"
+  },
+  "email":  "kranganathan@berkeley.edu",
+  "root":  "/Users/krangana/assignment1-basics",
+  "host":  "wifi-10-44-208-19.wifi.berkeley.edu",
+  "executable":  "/Users/krangana/assignment1-basics/.venv/bin/python",
+  "writerId":  "ohfp6xijnf2h41e3k0nkzb7xxpdyht7u"
+}

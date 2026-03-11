@@ -4,173 +4,123 @@ from cs336_basics.tokenizer import *
 from cs336_basics.dataloader import *
 from cs336_basics.bpe import *
 import numpy as np
+import math
+import os
 import yaml
 import wandb
+import torch
+import torch.nn.functional as F
 
 
-def run_train(model, train_config, metrics): 
+def get_lr(step: int, max_lr: float, min_lr: float, warmup_iters: int, max_iters: int) -> float:
+    if step < warmup_iters:
+        return max_lr * step / warmup_iters
+    if step >= max_iters:
+        return min_lr
+    progress = (step - warmup_iters) / (max_iters - warmup_iters)
+    return min_lr + 0.5 * (max_lr - min_lr) * (1 + math.cos(math.pi * progress))
+
+
+def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0):
+    train_cfg      = config["training"]
+    opt_cfg        = config["optimizer"]
+    sched_cfg      = config["lr_schedule"]
+    ckpt_cfg       = config["checkpoint"]
+    data_cfg       = config["data"]
+
+    device         = str(train_cfg["device"])
+    batch_size     = int(train_cfg["batch_size"])
+    max_iters      = int(train_cfg["max_iters"])
+    val_every      = int(train_cfg["val_every"])
+    val_iters      = int(train_cfg["val_iters"])
+    context_length = int(data_cfg["context_length"])
+    grad_clip      = float(opt_cfg["grad_clip"])
+    max_lr         = float(opt_cfg["lr"])
+    min_lr         = float(sched_cfg["min_lr"])
+    warmup_iters   = int(sched_cfg["warmup_iters"])
+    save_every     = int(ckpt_cfg["save_every"])
+    ckpt_dir       = str(ckpt_cfg["out_dir"])
+
+    os.makedirs(ckpt_dir, exist_ok=True)
     model.to(device)
+    wandb.watch(model, log="all", log_freq=100)
 
-    # Optional: watch gradients/params
-    wandb.watch(model, criterion, log="all", log_freq=100)
+    for step in range(start_iter, max_iters):
+        # LR schedule
+        lr = get_lr(step, max_lr, min_lr, warmup_iters, max_iters)
+        for g in optimizer.param_groups:
+            g["lr"] = lr
 
-    global_step = 0
-    best_val_loss = float("inf")
-
-    for epoch in range(config.num_epochs):
-        # -------------------
-        # Training
-        # -------------------
+        # Training step
         model.train()
-        train_loss_sum = 0.0
-        train_correct = 0
-        train_total = 0
-        epoch_start = time.time()
+        x, y = get_datapoints_from_source(train_dataset, batch_size, context_length, device)
 
-        for batch_idx, batch in enumerate(train_loader):
-            # assumes batch = (inputs, targets)
-            inputs, targets = batch
-            inputs = inputs.to(device)
-            targets = targets.to(device)
+        optimizer.zero_grad()
+        logits = model(x)                                        # (B, T, vocab_size)
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+        loss.backward()
 
-            optimizer.zero_grad()
+        if grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
 
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+        optimizer.step()
 
-            loss.backward()
-            optimizer.step()
+        wandb.log({"train/loss": loss.item(), "lr": lr}, step=step)
 
-            # metrics
-            train_loss_sum += loss.item() * inputs.size(0)
-            preds = outputs.argmax(dim=1)
-            train_correct += (preds == targets).sum().item()
-            train_total += targets.size(0)
-
-            # step-level logging
-            wandb.log(
-                {
-                    "train/loss_step": loss.item(),
-                    "train/lr": optimizer.param_groups[0]["lr"],
-                    "global_step": global_step,
-                },
-                step=global_step,
-            )
-
-            global_step += 1
-
-        train_loss = train_loss_sum / train_total
-        train_acc = train_correct / train_total
-
-        # -------------------
         # Validation
-        # -------------------
-        model.eval()
-        val_loss_sum = 0.0
-        val_correct = 0
-        val_total = 0
+        # if (step + 1) % val_every == 0:
+        #     model.eval()
+        #     val_losses = []
+        #     with torch.no_grad():
+        #         for _ in range(val_iters):
+        #             vx, vy = get_datapoints_from_source(val_dataset, batch_size, context_length, device)
+        #             vlogits = model(vx)
+        #             val_losses.append(F.cross_entropy(vlogits.view(-1, vlogits.size(-1)), vy.view(-1)).item())
+        #     val_loss = sum(val_losses) / len(val_losses)
+        #     print(f"step {step+1}/{max_iters} | train_loss={loss.item():.4f} | val_loss={val_loss:.4f} | lr={lr:.2e}")
+        #     wandb.log({"val/loss": val_loss}, step=step)
 
-        with torch.no_grad():
-            for batch in val_loader:
-                inputs, targets = batch
-                inputs = inputs.to(device)
-                targets = targets.to(device)
-
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-
-                val_loss_sum += loss.item() * inputs.size(0)
-                preds = outputs.argmax(dim=1)
-                val_correct += (preds == targets).sum().item()
-                val_total += targets.size(0)
-
-        val_loss = val_loss_sum / val_total
-        val_acc = val_correct / val_total
-        epoch_time = time.time() - epoch_start
-
-        # epoch-level logging
-        wandb.log(
-            {
-                "epoch": epoch,
-                "train/loss": train_loss,
-                "train/acc": train_acc,
-                "val/loss": val_loss,
-                "val/acc": val_acc,
-                "epoch_time_sec": epoch_time,
-            },
-            step=global_step,
-        )
-
-        print(
-            f"Epoch {epoch+1}/{config.num_epochs} | "
-            f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} | "
-            f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
-        )
-
-        # save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            ckpt_path = "best_model.pt"
-            torch.save(model.state_dict(), ckpt_path)
-
-            # upload checkpoint to W&B
-            artifact = wandb.Artifact("best-model", type="model")
-            artifact.add_file(ckpt_path)
-            wandb.log_artifact(artifact)
+        # Checkpoint
+        if (step + 1) % save_every == 0:
+            ckpt_path = os.path.join(ckpt_dir, f"checkpoint_{step+1}.pt")
+            save_checkpoint(model, optimizer, step + 1, ckpt_path)
+            print(f"Saved checkpoint: {ckpt_path}")
 
     wandb.finish()
 
 
-
-
-
-if __name__ == "__main__": 
-    with open("train_config.yaml", "r") as f:
+if __name__ == "__main__":
+    with open("cs336_basics/configs/train_config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
-    train_data_file = config["data"]["train_file"]
-    val_data_file = config["data"]["val_file"]
+    device         = str(config["training"]["device"])
+    vocab_size     = int(config["model"]["vocab_size"])
+    checkpoint_src = config["checkpoint"]["resume_from"]  # str or None
 
-    context_length = config["data"]["context_length"]
-    special_tokens = config["data"]["special_tokens"]
-    batch_size  = config["training"]["batch_size"]
-    device = config["training"]["device"]
-
-    # checkpointing
-
-    checkpoint_save_every = config["checkpoint"]["save_every"]
-    checkpoint_dir = config["checkpoint"]["out_dir"]
-    checkpoint_src = config["checkpoint"]["resume_from"]
-
-
-    # Expect pre-tokenized .npy files (run create_dataset.py first)
-    vocab_size = config["model"]["vocab_size"]
     dtype = np.uint16 if vocab_size <= 65535 else np.uint32
+    train_dataset = load_dataset_mmap(config["data"]["train_file"], dtype=dtype)
+    #val_dataset   = load_dataset_mmap(config["data"]["val_file"],   dtype=dtype)
+    val_dataset = None
 
-    train_dataset = load_dataset_mmap(train_data_file, dtype=dtype)
-    val_dataset   = load_dataset_mmap(val_data_file,   dtype=dtype)
+    model = init_model_from_config(config)
 
-    model = init_model_from_config(config["model"], checkpoint_src)
+    opt_cfg = config["optimizer"]
+    optimizer = AdamW(
+        model.parameters(),
+        lr=float(opt_cfg["lr"]),
+        betas=tuple(float(b) for b in opt_cfg["betas"]),
+        weight_decay=float(opt_cfg["weight_decay"]),
+        eps=float(opt_cfg["eps"]),
+    )
 
-    optimizer = AdamW(model.parameters())
+    start_iter = 0
+    if checkpoint_src is not None:
+        start_iter = load_checkpoint(checkpoint_src, model, optimizer)
 
-    project_name = config["wandb"]["project"]
-    run_name = config["wandb"]["run_name"]
+    wandb.init(
+        project=config["wandb"]["project"],
+        name=config["wandb"]["run_name"],
+        config=config,
+    )
 
-    wandb.init(project=project_name, name=run_name, config=config)
-    metrics = dict()
-
-    # here our dataloader is just a memory-mapped numpy array
-    run_train(model, train_dataset, config, metrics)
-
-
-
-
-    
-
-
-
-    
-
-
-
+    run_train(model, train_dataset, val_dataset, optimizer, config, start_iter)

@@ -35,7 +35,6 @@ def tokenize_file_to_npy(
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     np.save(output_path, arr)
-    print(f"Saved {len(arr):,} tokens → {output_path}  (dtype={dtype})")
 
     # Sanity-check: reload and verify no out-of-range token IDs
     check = np.load(output_path, mmap_mode="r")

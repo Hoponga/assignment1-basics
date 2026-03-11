@@ -20,7 +20,7 @@ training:
   max_iters: 10000
   val_every: 500 
   val_iters: 50
-  device: mps
+  device: cpu
 
 optimizer:
   lr: 3e-4
