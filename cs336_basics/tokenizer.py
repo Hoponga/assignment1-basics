@@ -48,7 +48,7 @@ class Tokenizer:
             parts = [text]
 
         for part in parts:
-            if part in self.special_tokens:
+            if self.special_tokens and part in self.special_tokens:
                 tokenized.append(self.token_to_id[part.encode("utf-8")])
                 continue
 
@@ -106,11 +106,11 @@ class Tokenizer:
     def decode(self, ids: list[int]) -> str: 
         # decode just reconstructs a list of token ids back into text 
 
-        decoded_text = "" 
+        decoded_bytes = b""
         for id in ids: 
-            decoded_text += self.id_to_token[id].decode('utf-8')
+            decoded_bytes += self.id_to_token[id]
         
-        return decoded_text 
+        return decoded_bytes.decode("utf-8", errors="replace")
         
 
         
