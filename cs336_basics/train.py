@@ -10,6 +10,7 @@ import yaml
 import wandb
 import torch
 import torch.nn.functional as F
+from tqdm import tqdm
 
 
 def get_lr(step: int, max_lr: float, min_lr: float, warmup_iters: int, max_iters: int) -> float:
@@ -45,7 +46,8 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
     model.to(device)
     wandb.watch(model, log="all", log_freq=100)
 
-    for step in range(start_iter, max_iters):
+    pbar = tqdm(range(start_iter, max_iters), initial=start_iter, total=max_iters)
+    for step in pbar:
         # LR schedule
         lr = get_lr(step, max_lr, min_lr, warmup_iters, max_iters)
         for g in optimizer.param_groups:
@@ -65,26 +67,27 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
 
         optimizer.step()
 
+        pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr:.2e}")
         wandb.log({"train/loss": loss.item(), "lr": lr}, step=step)
 
         # Validation
-        # if (step + 1) % val_every == 0:
-        #     model.eval()
-        #     val_losses = []
-        #     with torch.no_grad():
-        #         for _ in range(val_iters):
-        #             vx, vy = get_datapoints_from_source(val_dataset, batch_size, context_length, device)
-        #             vlogits = model(vx)
-        #             val_losses.append(F.cross_entropy(vlogits.view(-1, vlogits.size(-1)), vy.view(-1)).item())
-        #     val_loss = sum(val_losses) / len(val_losses)
-        #     print(f"step {step+1}/{max_iters} | train_loss={loss.item():.4f} | val_loss={val_loss:.4f} | lr={lr:.2e}")
-        #     wandb.log({"val/loss": val_loss}, step=step)
+        if (step + 1) % val_every == 0:
+            model.eval()
+            val_losses = []
+            with torch.no_grad():
+                for _ in range(val_iters):
+                    vx, vy = get_datapoints_from_source(val_dataset, batch_size, context_length, device)
+                    vlogits = model(vx)
+                    val_losses.append(F.cross_entropy(vlogits.view(-1, vlogits.size(-1)), vy.view(-1)).item())
+            val_loss = sum(val_losses) / len(val_losses)
+            print(f"step {step+1}/{max_iters} | train_loss={loss.item():.4f} | val_loss={val_loss:.4f} | lr={lr:.2e}")
+            wandb.log({"val/loss": val_loss}, step=step)
 
         # Checkpoint
         if (step + 1) % save_every == 0:
             ckpt_path = os.path.join(ckpt_dir, f"checkpoint_{step+1}.pt")
             save_checkpoint(model, optimizer, step + 1, ckpt_path)
-            print(f"Saved checkpoint: {ckpt_path}")
+            tqdm.write(f"Saved checkpoint: {ckpt_path}")
 
     wandb.finish()
 
@@ -101,7 +104,6 @@ if __name__ == "__main__":
     train_dataset = load_dataset_mmap(config["data"]["train_file"], dtype=dtype)
     #val_dataset   = load_dataset_mmap(config["data"]["val_file"],   dtype=dtype)
     val_dataset = None
-
     model = init_model_from_config(config)
 
     opt_cfg = config["optimizer"]

@@ -38,13 +38,16 @@ def tokenize_file_to_npy(
 
     # Sanity-check: reload and verify no out-of-range token IDs
     check = np.load(output_path, mmap_mode="r")
-    vocab_size = len(tokenizer.vocab)
+    vocab_size = len(tokenizer.id_to_token)
     assert int(check.max()) < vocab_size, (
         f"Token ID {int(check.max())} exceeds vocab_size {vocab_size}"
     )
     assert int(check.min()) >= 0, "Negative token IDs found"
     print(f"Sanity check passed: values in [0, {int(check.max())}], vocab_size={vocab_size}")
 
+
+
+    
 
 if __name__ == "__main__":
     import yaml
@@ -69,8 +72,8 @@ if __name__ == "__main__":
 
     # Choose dtype based on vocab size
     dtype = np.uint16 if vocab_size <= 65535 else np.uint32
-    print("tokenizing train file")
-    tokenize_file_to_npy(train_txt, train_npy, tokenizer, dtype=dtype)
+    # print("tokenizing train file")
+    # tokenize_file_to_npy(train_txt, train_npy, tokenizer, dtype=dtype)
 
     print("tokenizing val file")
     tokenize_file_to_npy(val_txt,   val_npy,   tokenizer, dtype=dtype)
