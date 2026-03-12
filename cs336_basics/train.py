@@ -3,13 +3,13 @@ from cs336_basics.model import *
 from cs336_basics.tokenizer import *
 from cs336_basics.dataloader import *
 from cs336_basics.bpe import *
+from cs336_basics.loss import CrossEntropyLoss
 import numpy as np
 import math
 import os
 import yaml
 import wandb
 import torch
-import torch.nn.functional as F
 from tqdm import tqdm
 
 
@@ -44,6 +44,7 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
 
     os.makedirs(ckpt_dir, exist_ok=True)
     model.to(device)
+    criterion = CrossEntropyLoss()
     wandb.watch(model, log="all", log_freq=100)
 
     pbar = tqdm(range(start_iter, max_iters), initial=start_iter, total=max_iters)
@@ -59,11 +60,11 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
 
         optimizer.zero_grad()
         logits = model(x)                                        # (B, T, vocab_size)
-        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+        loss = criterion(logits, y)
         loss.backward()
 
         if grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            run_gradient_clipping(model.parameters(), grad_clip)
 
         optimizer.step()
 
@@ -78,7 +79,7 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
                 for _ in range(val_iters):
                     vx, vy = get_datapoints_from_source(val_dataset, batch_size, context_length, device)
                     vlogits = model(vx)
-                    val_losses.append(F.cross_entropy(vlogits.view(-1, vlogits.size(-1)), vy.view(-1)).item())
+                    val_losses.append(criterion(vlogits, vy).item())
             val_loss = sum(val_losses) / len(val_losses)
             print(f"step {step+1}/{max_iters} | train_loss={loss.item():.4f} | val_loss={val_loss:.4f} | lr={lr:.2e}")
             wandb.log({"val/loss": val_loss}, step=step)
@@ -86,7 +87,7 @@ def run_train(model, train_dataset, val_dataset, optimizer, config, start_iter=0
         # Checkpoint
         if (step + 1) % save_every == 0:
             ckpt_path = os.path.join(ckpt_dir, f"checkpoint_{step+1}.pt")
-            save_checkpoint(model, optimizer, step + 1, ckpt_path)
+            save_checkpoint(model, optimizer, step + 1, ckpt_path, wandb_run_id=wandb.run.id)
             tqdm.write(f"Saved checkpoint: {ckpt_path}")
 
     wandb.finish()
@@ -102,8 +103,7 @@ if __name__ == "__main__":
 
     dtype = np.uint16 if vocab_size <= 65535 else np.uint32
     train_dataset = load_dataset_mmap(config["data"]["train_file"], dtype=dtype)
-    #val_dataset   = load_dataset_mmap(config["data"]["val_file"],   dtype=dtype)
-    val_dataset = None
+    val_dataset   = load_dataset_mmap(config["data"]["val_file"],   dtype=dtype)
     model = init_model_from_config(config)
 
     opt_cfg = config["optimizer"]
@@ -116,13 +116,21 @@ if __name__ == "__main__":
     )
 
     start_iter = 0
+    wandb_run_id = None
     if checkpoint_src is not None:
-        start_iter = load_checkpoint(checkpoint_src, model, optimizer)
+        start_iter, wandb_run_id = load_checkpoint(checkpoint_src, model, optimizer)
 
-    wandb.init(
-        project=config["wandb"]["project"],
-        name=config["wandb"]["run_name"],
-        config=config,
-    )
+    if wandb_run_id is not None:
+        wandb.init(
+            project=config["wandb"]["project"],
+            id=wandb_run_id,
+            resume="must",
+        )
+    else:
+        wandb.init(
+            project=config["wandb"]["project"],
+            name=config["wandb"]["run_name"],
+            config=config,
+        )
 
     run_train(model, train_dataset, val_dataset, optimizer, config, start_iter)

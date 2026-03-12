@@ -3,24 +3,24 @@
 data:
   train_file: /Users/krangana/data/TinyStoriesV2-GPT4-train.npy    # pre-tokenized numpy array (run create_dataset.py)
   val_file: /Users/krangana/data/TinyStoriesV2-GPT4-valid.npy          # pre-tokenized numpy array
-  context_length: 1024
+  context_length: 256
   special_tokens: ["<|endoftext|>"]
 
 model:
   backbone: null
   vocab_size: 10000
   d_model: 768
-  num_layers: 8
+  num_layers: 4
   num_heads: 12
   d_ff: 2048                      # ~2.7x d_model for SwiGLU
   rope_theta: 10000.0
 
 training:
-  batch_size: 64
+  batch_size: 16
   max_iters: 100000
   val_every: 2000
   val_iters: 50
-  device: cpu
+  device: mps
 
 optimizer:
   lr: 3e-4
@@ -40,4 +40,4 @@ wandb:
 checkpoint:
   save_every: 5000
   out_dir: checkpoints/
-  resume_from: null               # path to checkpoint to resume from, or null
+  resume_from: checkpoints/checkpoint_5000.pt               # path to checkpoint to resume from, or null

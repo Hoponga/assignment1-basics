@@ -10,11 +10,8 @@ class Linear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         sd = math.sqrt(2.0/(in_features + out_features))
-        weight_tensor = nn.init.trunc_normal_(torch.empty(out_features, in_features, dtype=dtype), std=sd*sd, a=-3*sd, b=3*sd)
+        weight_tensor = nn.init.trunc_normal_(torch.empty(out_features, in_features, dtype=dtype, device=device), std=sd*sd, a=-3*sd, b=3*sd)
         self.weight = nn.Parameter(weight_tensor)
-        if device:
-            self.device = device
-            self.weight = self.weight.to(device)
 
     # x is of shape [..., in_features]
     def forward(self, x):
@@ -40,9 +37,7 @@ class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(d_model, dtype=dtype))
-        if device:
-            self.weight = self.weight.to(device)
+        self.weight = nn.Parameter(torch.ones(d_model, dtype=dtype, device=device))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [..., d_model]
@@ -293,7 +288,7 @@ class TransformerLM(nn.Module):
         self.context_length = context_length
 
         # nn.Embedding gives state dict key `token_embeddings.weight`
-        self.token_embeddings = nn.Embedding(vocab_size, d_model)
+        self.token_embeddings = nn.Embedding(vocab_size, d_model, device=device)
 
         self.layers = nn.ModuleList([
             TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta, device=device, dtype=dtype)
@@ -301,9 +296,6 @@ class TransformerLM(nn.Module):
         ])
         self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
         self.lm_head = Linear(d_model, vocab_size, device=device, dtype=dtype)
-
-        if device:
-            self.token_embeddings = self.token_embeddings.to(device)
 
     def forward(self, in_indices: torch.Tensor) -> torch.Tensor:
         # in_indices: [batch, seq_len]

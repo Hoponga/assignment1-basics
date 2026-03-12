@@ -37,21 +37,23 @@ def get_datapoints_from_source(dataset: npt.NDArray, batch_size: int, context_le
 def save_checkpoint(model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     iteration: int,
-    out: str | os.PathLike | BinaryIO | IO[bytes],): 
+    out: str | os.PathLike | BinaryIO | IO[bytes],
+    wandb_run_id: str | None = None,):
 
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'iteration': iteration,
+        'wandb_run_id': wandb_run_id,
     }, out)
 
 def load_checkpoint(src: str | os.PathLike | BinaryIO | IO[bytes],
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,):
 
-    
     checkpoint = torch.load(src, weights_only=True)
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    return checkpoint['iteration'] 
+    wandb_run_id = checkpoint.get('wandb_run_id', None)
+    return checkpoint['iteration'], wandb_run_id
     

@@ -1,6 +1,6 @@
 import torch
 
-from typing import Optional, Callable
+from typing import Optional, Callable, Iterable
 
 
 class AdamW(torch.optim.Optimizer):
@@ -50,3 +50,12 @@ class AdamW(torch.optim.Optimizer):
                 p.data.addcdiv_(m_hat, v_hat.sqrt().add_(eps), value=-lr)
 
         return loss
+
+
+def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+    grads = [p.grad for p in parameters if p.grad is not None]
+    total_norm = torch.sqrt(sum(g.pow(2).sum() for g in grads))
+    if total_norm > max_l2_norm:
+        scale = max_l2_norm / total_norm
+        for g in grads:
+            g.mul_(scale)
