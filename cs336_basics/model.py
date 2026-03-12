@@ -310,6 +310,96 @@ class TransformerLM(nn.Module):
         x = self.ln_final(x)
         return self.lm_head(x)  # [batch, seq_len, vocab_size]
 
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        eos_token_id: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Autoregressively generate tokens given a prompt.
+
+        Args:
+            prompt:         (seq_len,) or (1, seq_len) int tensor of prompt token IDs.
+            max_new_tokens: maximum number of new tokens to generate.
+            temperature:    softmax temperature; 1.0 = no change, <1.0 = sharper.
+            top_p:          nucleus sampling probability mass cutoff (1.0 = disabled).
+            eos_token_id:   if set, stop generation when this token is sampled.
+
+        Returns:
+            (1, prompt_len + generated_len) int tensor of the full sequence.
+        """
+        if prompt.dim() == 1:
+            prompt = prompt.unsqueeze(0)  # (1, seq_len)
+
+        tokens = prompt
+        for _ in range(max_new_tokens):
+            # Truncate to context window
+            ctx = tokens[:, -self.context_length:]
+            logits = self.forward(ctx)           # (1, seq_len, vocab_size)
+            next_logits = logits[:, -1, :]       # (1, vocab_size)
+
+            # Temperature scaling
+            if temperature != 1.0:
+                next_logits = next_logits / temperature
+
+            probs = torch.softmax(next_logits, dim=-1)  # (1, vocab_size)
+
+            # Top-p (nucleus) sampling
+            if top_p < 1.0:
+                sorted_probs, sorted_idx = torch.sort(probs, dim=-1, descending=True)
+                cumulative = torch.cumsum(sorted_probs, dim=-1)
+                # Remove tokens once cumulative mass exceeds top_p
+                # Keep at least the top token
+                mask = (cumulative - sorted_probs) >= top_p
+                sorted_probs[mask] = 0.0
+                sorted_probs = sorted_probs / sorted_probs.sum(dim=-1, keepdim=True)
+                next_token = sorted_idx.gather(-1, torch.multinomial(sorted_probs, num_samples=1))
+            else:
+                next_token = torch.multinomial(probs, num_samples=1)  # (1, 1)
+
+            tokens = torch.cat([tokens, next_token], dim=-1)
+
+            if eos_token_id is not None and next_token.item() == eos_token_id:
+                break
+
+        return tokens
+
+    @classmethod
+    def from_pretrained(cls, checkpoint_path: str, config: dict, device: str = "cpu") -> "TransformerLM":
+        """
+        Load a TransformerLM from a checkpoint saved by save_checkpoint.
+
+        Args:
+            checkpoint_path: path to the .pt checkpoint file.
+            config:          the same config dict used during training.
+            device:          device to load the model onto.
+
+        Returns:
+            TransformerLM with weights loaded, in eval mode.
+        """
+        model_cfg = config["model"]
+        data_cfg  = config["data"]
+
+        model = cls(
+            vocab_size=int(model_cfg["vocab_size"]),
+            context_length=int(data_cfg["context_length"]),
+            d_model=int(model_cfg["d_model"]),
+            num_layers=int(model_cfg["num_layers"]),
+            num_heads=int(model_cfg["num_heads"]),
+            d_ff=int(model_cfg["d_ff"]),
+            rope_theta=float(model_cfg.get("rope_theta", 10000.0)),
+            device=device,
+        )
+
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+        return model
+
 
 
 

@@ -77,22 +77,25 @@ def merge_vocab(pair: Tuple[Symbol, Symbol], v_in: Dict[Word, int]) -> Dict[Word
     return v_out
 
 
-# chunk for multiprocessing
+# chunk for multiprocessing — returns byte offsets, not loaded strings
 def _chunk_file_for_pretokenization(
     input_path: str,
     num_processes: int,
     split_special_token: bytes,
-) -> List[str]:
+) -> List[Tuple[int, int]]:
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(f, num_processes, split_special_token)
+    return list(zip(boundaries[:-1], boundaries[1:]))
 
-        chunks = []
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            chunks.append(chunk)
 
-    return chunks
+def _pretokenize_file_slice(
+    args: Tuple[str, int, int, List[str]],
+) -> Dict[Word, int]:
+    input_path, start, end, special_tokens = args
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+    return pretokenize_chunk_text(chunk, special_tokens)
 
 
 
@@ -131,15 +134,15 @@ def train_bpe(
             text = f.read()
         vocab_counts = pretokenize_chunk_text(text, special_tokens)
     else:
-        chunks = _chunk_file_for_pretokenization(
+        offsets = _chunk_file_for_pretokenization(
             input_path=input_path,
             num_processes=num_processes,
             split_special_token=split_special_token,
         )
 
-
-        with mp.Pool(processes=len(chunks)) as pool:
-            chunk_dicts = pool.starmap(pretokenize_chunk_text, [(chunk, special_tokens) for chunk in chunks])
+        args = [(input_path, start, end, special_tokens) for start, end in offsets]
+        with mp.Pool(processes=len(offsets)) as pool:
+            chunk_dicts = pool.map(_pretokenize_file_slice, args)
 
         vocab_counts = merge_count_dicts(chunk_dicts)
 
