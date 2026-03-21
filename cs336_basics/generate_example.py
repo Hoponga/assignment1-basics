@@ -14,8 +14,14 @@ with open(CONFIG) as f:
 
 device = "mps"
 
+
+
+
+
 with open(VOCAB_MERGES_PKL, "rb") as f:
     cached = pickle.load(f)
+
+
 
 tokenizer = Tokenizer(cached["vocab"], cached["merges"], special_tokens=cached["special_tokens"])
 eos_id = tokenizer.token_to_id.get("<|endoftext|>".encode("utf-8"))
